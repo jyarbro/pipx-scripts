@@ -1,0 +1,9 @@
+[project]
+name = "ytgrabber"
+version = "0.1.0"
+description = "Download YouTube videos using yt-dlp with auto-update"
+requires-python = ">=3.7"
+dependencies = ["requests","mutagen","openai"]
+
+[project.scripts]
+ytgrabber = "ytgrabber.__main__:main"
