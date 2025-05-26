@@ -1,8 +1,8 @@
 [project]
 name = "kernelcleaner"
-version = "0.1.1"
+version = "0.2.0"
 description = "A CLI tool to remove old Linux kernels"
-authors = [{name = "nrrdio", email = "nrrdio@outlook.com"}]
+authors = [{ name = "nrrdio", email = "nrrdio@outlook.com" }]
 dependencies = []
 requires-python = ">=3.7"
 
