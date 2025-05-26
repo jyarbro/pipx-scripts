@@ -1,0 +1,13 @@
+[project]
+name = "brightshift"
+version = "0.1.0"
+description = "Quickly switch monitor brightness using xrandr"
+authors = [{ name = "nrrdio", email = "nrrdio@outlook.com" }]
+dependencies = []
+
+[project.scripts]
+brightshift = "brightshift.__main__:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
