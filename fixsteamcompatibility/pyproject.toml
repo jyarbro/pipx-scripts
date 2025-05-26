@@ -1,6 +1,6 @@
 [project]
 name = "fixsteamcompatibility"
-version = "0.1.0"
+version = "0.1.1"
 description = "Move Steam Proton compatdata to a native filesystem and replace with symlinks."
 authors = [{ name = "nrrdio", email = "nrrdio@outlook.com" }]
 dependencies = []
