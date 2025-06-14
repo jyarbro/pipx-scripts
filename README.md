@@ -12,6 +12,7 @@ A collection of custom Python command-line tools designed to be installed and ru
 | **`fixsteamcompatibility`** | Moves all Proton compatibility prefixes to a native filesystem and replaces them with symlinks — solving Steam/Proton symlink issues. |
 | **`kernelcleaner`**         | Safely removes old Linux kernel versions to free up disk space.                                                                       |
 | **`brightshift`**           | Instantly adjusts monitor brightness using `xrandr`, useful for multi-monitor Linux setups.                                           |
+| **`shrinkaudio`**           | Batch-downsizes MP3 and M4A files by slightly lowering their bitrate using `ffmpeg`. Skips files prefixed with `OLD`.                 |
 
 Each tool is completely self-contained and can be installed or uninstalled independently.
 
@@ -46,3 +47,5 @@ Install pipx if you haven't:
 python3 -m pip install --user pipx
 python3 -m pipx ensurepath
 ```
+
+---
