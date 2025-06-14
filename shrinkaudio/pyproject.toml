@@ -1,0 +1,15 @@
+[project]
+name = "shrinkaudio"
+version = "0.1.0"
+description = "Batch downsample MP3/M4A files slightly to reduce size"
+authors = [{ name = "nrrdio", email = "nrrdio@outlook.com" }]
+dependencies = [
+    "colorama"
+]
+
+[project.scripts]
+shrinkaudio = "shrinkaudio.__main__:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
