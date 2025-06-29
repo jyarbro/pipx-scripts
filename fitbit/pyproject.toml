@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fitbit"
-version = "0.4.4"
+version = "0.5.0"
 description = "Fetch Fitbit OAuth2 token from the command-line"
 authors = [ { name = "nrrdio", email = "nrrdio@outlook.com" } ]
 requires-python = ">=3.8"

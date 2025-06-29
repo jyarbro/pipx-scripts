@@ -9,6 +9,7 @@ from urllib.parse import urlparse, parse_qs
 from requests.utils import requote_uri
 
 SECRETS_PATH = os.path.expanduser("~/.config/fitbit/.secrets")
+SCOPES_PATH = os.path.expanduser("~/.config/fitbit/.scopes")
 REQUIRED_KEYS = ["CLIENT_ID", "CLIENT_SECRET", "REDIRECT_URI"]
 
 def load_secrets():
@@ -31,19 +32,44 @@ def load_secrets():
                 f.write(f"{key}={secrets[key]}\n")
     return secrets['CLIENT_ID'], secrets['CLIENT_SECRET'], secrets['REDIRECT_URI']
 
+def load_scopes():
+    os.makedirs(os.path.dirname(SCOPES_PATH), exist_ok=True)
+    scopes = []
+    if os.path.isfile(SCOPES_PATH):
+        with open(SCOPES_PATH) as f:
+            for line in f:
+                s = line.strip()
+                if s and not s.startswith('#'):
+                    scopes.append(s)
+    if not scopes:
+        print("Scopes config not found — let's set it up.")
+        while True:
+            s = input("Enter a scope (blank to finish): ").strip()
+            if not s:
+                break
+            if not s.startswith('#'):
+                scopes.append(s)
+        with open(SCOPES_PATH, 'w') as f:
+            for sc in scopes:
+                f.write(sc + "\n")
+    return scopes
+
 def main():
     parser = ArgumentParser(description='Fetch Fitbit OAuth2 token')
     parser.add_argument('code', nargs='?', help='Authorization code')
     args = parser.parse_args()
+
     client_id, client_secret, redirect_uri = load_secrets()
     code = args.code
     if not code:
+        scopes_list = load_scopes()
+        scope_param = requote_uri(' '.join(scopes_list))
         auth_url = (
             f"https://www.fitbit.com/oauth2/authorize"
             f"?response_type=code"
             f"&client_id={client_id}"
             f"&redirect_uri={requote_uri(redirect_uri)}"
-            f"&scope=activity"
+            f"&scope={scope_param}"
         )
         print(f"Open this URL in your browser and complete login:\n{auth_url}")
         webbrowser.open(auth_url)
@@ -52,6 +78,7 @@ def main():
         if not code:
             print('Failed to extract authorization code')
             sys.exit(1)
+
     credentials = f"{client_id}:{client_secret}"
     token_resp = requests.post(
         'https://api.fitbit.com/oauth2/token',
@@ -69,13 +96,15 @@ def main():
     if token_resp.status_code != 200:
         print(f"Error fetching token: {token_resp.status_code}\n{token_resp.text}")
         sys.exit(1)
+
     try:
         data = token_resp.json()
     except json.JSONDecodeError:
         print('Received non-JSON response:')
         print(token_resp.text)
         sys.exit(1)
-    for k, v in data.items():
-        print(k)
-        print(v)
+
+    for key, value in data.items():
+        print(key)
+        print(value)
         print()
