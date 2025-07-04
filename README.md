@@ -7,7 +7,7 @@ A collection of custom Python command-line tools designed to be installed and ru
 ## 📦 Included Tools
 
 | Tool                        | Description                                                                                                                           |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------
 | **`ytgrabber`**             | Downloads videos using `yt-dlp`. Automatically updates to the latest version.                                                         |
 | **`fixsteamcompatibility`** | Moves all Proton compatibility prefixes to a native filesystem and replaces them with symlinks — solving Steam/Proton symlink issues. |
 | **`kernelcleaner`**         | Safely removes old Linux kernel versions to free up disk space.                                                                       |

@@ -1,37 +1,26 @@
 # shrinkaudio
 
-**shrinkaudio** is a CLI tool for batch downsizing `.mp3` and `.m4a` audio files to fit under a target file size (default: 200MB), using smart VBR/CBR bitrate selection via `ffmpeg`.
+CLI tool for batch downsizing `.mp3` and `.m4a` audio files to fit under a target file size using smart bitrate selection.
 
----
-
-## 🚀 Usage
+## Usage
 
 ```bash
-shrinkaudio                # Optimize all .mp3 and .m4a files in the current folder
+shrinkaudio
 ```
 
-Automatically analyzes each file, skips anything under 200MB, and smartly re-encodes anything larger.
-
----
-
-## 🎯 Features
+## Features
 
 * Estimates bitrate needed to fit under 200MB
-* Tries high-quality **VBR** first (`q=0` to `q=4`)
-* Falls back to **CBR** from 320 kbps down to 192 kbps
-* Keeps original file as `OLD.filename`
-* Clean output with optional live encode progress
+* Uses high-quality VBR when possible, falls back to CBR
+* Preserves original files with `OLD.` prefix
+* Provides clean output with optional encoding progress
 
----
+## Requirements
 
-## ⚠️ Requirements
-
-* `ffmpeg` must be available in `$PATH`
+* `ffmpeg` available in system path
 * Python package `colorama`
 
----
-
-## 📁 Notes
+## Notes
 
 * Operates in the current directory only
 * Skips any file already starting with `OLD.`
