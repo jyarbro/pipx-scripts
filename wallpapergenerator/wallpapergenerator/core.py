@@ -282,17 +282,19 @@ def build_full_prompt(base_prompt, client):
     now = datetime.now(tz)
     time_str = now.strftime("%I:%M %p").lstrip("0")
     date_str = now.strftime("%B %d, %Y")
+    # Ask GPT for a phrase describing the current season, climate, weather, and time in the user's location
     weather_season_prompt = (
-        f"What is the current weather and season in {location} at {time_str} on {date_str}? "
-        "Respond with a short phrase suitable for an image prompt."
+        f"Describe the current season, climate, weather, and time in {location} at {time_str} on {date_str}. Respond with a short phrase suitable for an image prompt."
     )
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": weather_season_prompt}]
     )
-    weather_season = response.choices[0].message.content.strip()
+    location_context = response.choices[0].message.content.strip()
     # Compose final prompt
-    return f"{base_prompt}. {weather_season}. Time: {time_str}."
+    return (
+        f"{base_prompt} The image can take place anywhere, but it should reflect the current season, climate, weather, and time in your location. Context: {location_context}."
+    )
 
 # Find previous image ID for today (threading)
 def get_previous_image_id_today():
@@ -309,6 +311,29 @@ def get_previous_image_id_today():
     return sorted(images_today, key=lambda x: x[1]["timestamp"], reverse=True)[0][0]
 
 
+def is_session_unlocked_and_active():
+    try:
+        import getpass
+        user = getpass.getuser()
+        session = None
+        # Find session for current user (accept any session ID)
+        result = subprocess.run(["loginctl", "list-sessions"], capture_output=True, text=True)
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 3 and parts[2] == user:
+                session = parts[0]
+                break
+        if not session:
+            print(f"⚠️  No active session found for user '{user}'.")
+            return False
+        status_result = subprocess.run(["loginctl", "show-session", session, "-p", "LockedHint", "-p", "IdleHint"], capture_output=True, text=True)
+        status = status_result.stdout
+        return ("LockedHint=no" in status) and ("IdleHint=no" in status)
+    except Exception as e:
+        print(f"⚠️  Session check error: {e}")
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate AI wallpapers using OpenAI GPT-image-1", add_help=False)
     parser.add_argument("prompt", nargs="?", help="Description of the wallpaper to generate")
@@ -318,25 +343,37 @@ def main():
     parser.add_argument("--save-only", action="store_true", help="Save image without setting as wallpaper")
     parser.add_argument("--output-dir", default="~/Pictures/Wallpapers", help="Directory to save images")
     parser.add_argument("--list-ids", action="store_true", help="List previous generation IDs")
-    
+    parser.add_argument("--test-session", action="store_true", help="Test session lock/idle status and exit")
+    parser.add_argument("--reset-base-prompt", action="store_true", help="Reset the base prompt for today and start from scratch")
     args = parser.parse_args()
-    
+
+    if args.test_session:
+        if is_session_unlocked_and_active():
+            print("Session is unlocked and active.")
+        else:
+            print("Session is locked or idle.")
+        return
     if args.help:
         get_help()
     if args.list_ids:
         list_generation_ids()
         return
-    # Daily thread logic
     api_key = load_api_key()
     client = OpenAI(api_key=api_key)
-    base_prompt = load_daily_prompt()
-    if not base_prompt:
-        print("🌅 Generating new base prompt for today...")
+    if args.reset_base_prompt:
+        print("🔄 Resetting base prompt for today...")
         base_prompt = get_new_base_prompt(client)
         save_daily_prompt(base_prompt)
-        print(f"📝 Today's base prompt: {base_prompt}")
+        print(f"📝 New base prompt: {base_prompt}")
     else:
-        print(f"📝 Using today's base prompt: {base_prompt}")
+        base_prompt = load_daily_prompt()
+        if not base_prompt:
+            print("🌅 Generating new base prompt for today...")
+            base_prompt = get_new_base_prompt(client)
+            save_daily_prompt(base_prompt)
+            print(f"📝 Today's base prompt: {base_prompt}")
+        else:
+            print(f"📝 Using today's base prompt: {base_prompt}")
     # Build full prompt for this run
     full_prompt = build_full_prompt(base_prompt, client)
     print(f"🔗 Full prompt: {full_prompt}")
