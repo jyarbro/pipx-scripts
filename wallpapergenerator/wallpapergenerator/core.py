@@ -4,9 +4,16 @@ import sys
 import subprocess
 import requests
 import json
-from datetime import datetime
+from datetime import datetime, date
 from PIL import Image
 from openai import OpenAI
+import pytz
+
+
+CONFIG_DIR = os.path.expanduser("~/.config/wallpapergenerator")
+DAILY_PROMPT_FILE = os.path.join(CONFIG_DIR, "daily_prompt.json")
+HISTORY_FILE = os.path.join(CONFIG_DIR, "history.json")
+LOCATION_FILE = os.path.join(CONFIG_DIR, "location.json")
 
 
 def get_help():
@@ -55,14 +62,37 @@ def load_api_key():
         sys.exit(1)
 
 
+def ensure_config_dir():
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+
+
+def load_location():
+    ensure_config_dir()
+    if not os.path.exists(LOCATION_FILE):
+        print("❌ Location config not found!")
+        print("Please create ~/.config/wallpapergenerator/location.json with e.g. {\"location\": \"Your City, Country\"}")
+        sys.exit(1)
+    try:
+        with open(LOCATION_FILE, "r") as f:
+            data = json.load(f)
+            location = data.get("location")
+            if not location:
+                print("❌ Location not set in config file!")
+                print("Please set 'location' in ~/.config/wallpapergenerator/location.json")
+                sys.exit(1)
+            return location
+    except Exception:
+        print("❌ Error reading location config!")
+        sys.exit(1)
+
+
 def load_generation_history():
     """Load previous generation IDs and metadata"""
-    history_file = os.path.expanduser("~/.wallpapergenerator_history.json")
-    if not os.path.exists(history_file):
+    ensure_config_dir()
+    if not os.path.exists(HISTORY_FILE):
         return {}
-    
     try:
-        with open(history_file, 'r') as f:
+        with open(HISTORY_FILE, 'r') as f:
             return json.load(f)
     except Exception as e:
         print(f"⚠️  Error loading generation history: {e}")
@@ -71,9 +101,9 @@ def load_generation_history():
 
 def save_generation_history(history):
     """Save generation IDs and metadata"""
-    history_file = os.path.expanduser("~/.wallpapergenerator_history.json")
+    ensure_config_dir()
     try:
-        with open(history_file, 'w') as f:
+        with open(HISTORY_FILE, 'w') as f:
             json.dump(history, f, indent=2)
     except Exception as e:
         print(f"⚠️  Error saving generation history: {e}")
@@ -172,8 +202,15 @@ def create_filename(prompt, size, quality, generation_id):
     # Clean prompt for filename
     safe_prompt = "".join(c for c in prompt if c.isalnum() or c in (' ', '-', '_')).rstrip()
     safe_prompt = safe_prompt.replace(' ', '_')[:30]  # Limit length
-    
-    return f"wallpaper_{safe_prompt}_{generation_id}_{size}_{quality}.png"
+    # Extract date/time from generation_id
+    # generation_id: gen_YYYYMMDD_HHMMSS_xxxx
+    try:
+        dt_part = generation_id.split('_')[1] + '_' + generation_id.split('_')[2]
+        dt_fmt = datetime.strptime(dt_part, "%Y%m%d_%H%M%S")
+        date_str = dt_fmt.strftime("%Y-%m-%d_%H-%M-%S")
+    except Exception:
+        date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    return f"{date_str}_wallpaper_{safe_prompt}_1920x1080.png"
 
 
 def list_generation_ids():
@@ -202,6 +239,76 @@ def list_generation_ids():
         print()
 
 
+# Helper to get today's date string
+def get_today_str():
+    return date.today().isoformat()
+
+# Load daily prompt from file
+def load_daily_prompt():
+    ensure_config_dir()
+    if not os.path.exists(DAILY_PROMPT_FILE):
+        return None
+    try:
+        with open(DAILY_PROMPT_FILE, "r") as f:
+            data = json.load(f)
+            if data.get("date") == get_today_str():
+                return data.get("prompt")
+    except Exception:
+        pass
+    return None
+
+# Save daily prompt to file
+def save_daily_prompt(prompt):
+    ensure_config_dir()
+    with open(DAILY_PROMPT_FILE, "w") as f:
+        json.dump({"date": get_today_str(), "prompt": prompt}, f)
+
+# Generate a new base prompt for the day using GPT
+def get_new_base_prompt(client):
+    system_prompt = (
+        "Generate a creative, visually interesting wallpaper prompt for an AI image generator. "
+        "Do not include any time, weather, or season information."
+    )
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "system", "content": system_prompt}]
+    )
+    return response.choices[0].message.content.strip()
+
+# Build the full prompt for image generation
+def build_full_prompt(base_prompt, client):
+    location = load_location()
+    tz = pytz.timezone("America/New_York")
+    now = datetime.now(tz)
+    time_str = now.strftime("%I:%M %p").lstrip("0")
+    date_str = now.strftime("%B %d, %Y")
+    weather_season_prompt = (
+        f"What is the current weather and season in {location} at {time_str} on {date_str}? "
+        "Respond with a short phrase suitable for an image prompt."
+    )
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": weather_season_prompt}]
+    )
+    weather_season = response.choices[0].message.content.strip()
+    # Compose final prompt
+    return f"{base_prompt}. {weather_season}. Time: {time_str}."
+
+# Find previous image ID for today (threading)
+def get_previous_image_id_today():
+    history = load_generation_history()
+    today = get_today_str()
+    # Find latest image for today
+    images_today = [
+        (gen_id, data) for gen_id, data in history.items()
+        if data.get("timestamp", "").startswith(today)
+    ]
+    if not images_today:
+        return None
+    # Return most recent
+    return sorted(images_today, key=lambda x: x[1]["timestamp"], reverse=True)[0][0]
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate AI wallpapers using OpenAI GPT-image-1", add_help=False)
     parser.add_argument("prompt", nargs="?", help="Description of the wallpaper to generate")
@@ -216,28 +323,31 @@ def main():
     
     if args.help:
         get_help()
-    
     if args.list_ids:
         list_generation_ids()
         return
-    
-    if not args.prompt:
-        print("❌ Please provide a prompt for image generation.")
-        get_help()
-    
-    quality = validate_quality(args.quality)
-    
-    # Setup output directory
-    output_dir = os.path.expanduser(args.output_dir)
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Load API key and create client
+    # Daily thread logic
     api_key = load_api_key()
     client = OpenAI(api_key=api_key)
-    
+    base_prompt = load_daily_prompt()
+    if not base_prompt:
+        print("🌅 Generating new base prompt for today...")
+        base_prompt = get_new_base_prompt(client)
+        save_daily_prompt(base_prompt)
+        print(f"📝 Today's base prompt: {base_prompt}")
+    else:
+        print(f"📝 Using today's base prompt: {base_prompt}")
+    # Build full prompt for this run
+    full_prompt = build_full_prompt(base_prompt, client)
+    print(f"🔗 Full prompt: {full_prompt}")
+    # Find previous image for today (thread)
+    iterate_id = get_previous_image_id_today()
+    quality = validate_quality(args.quality)
+    output_dir = os.path.expanduser(args.output_dir)
+    os.makedirs(output_dir, exist_ok=True)
     # Generate image
-    result = generate_image(client, args.prompt, quality, args.iterate)
-    filename = create_filename(args.prompt, "1920x1080", quality, result["id"])
+    result = generate_image(client, full_prompt, quality, iterate_id)
+    filename = create_filename(full_prompt, "1920x1080", quality, result["id"])
     output_path = os.path.join(output_dir, filename)
     if save_image_from_base64(result["image_base64"], output_path):
         print(f"✅ Image generated successfully!")
