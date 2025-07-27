@@ -1,0 +1,18 @@
+[project]
+name = "wallpapergenerator"
+version = "0.3.0"
+description = "Generate AI wallpapers using OpenAI's GPT-image-1 with response models and iterative feedback"
+authors = [{ name = "nrrdio", email = "nrrdio@outlook.com" }]
+requires-python = ">=3.7"
+dependencies = [
+    "openai",
+    "requests",
+    "Pillow"
+]
+
+[project.scripts]
+wallpapergenerator = "wallpapergenerator.__main__:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
