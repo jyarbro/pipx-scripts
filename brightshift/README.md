@@ -2,6 +2,13 @@
 
 Simple CLI tool for adjusting screen brightness on all connected displays using `xrandr`.
 
+## Installation
+
+Install via pipx:
+```bash
+pipx install /path/to/brightshift
+```
+
 ## Usage
 
 ```bash

@@ -8,11 +8,12 @@ A collection of custom Python command-line tools designed to be installed and ru
 
 | Tool                        | Description                                                                                                                           |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------
-| **`ytgrabber`**             | Downloads videos using `yt-dlp`. Automatically updates to the latest version.                                                         |
+| **`ytgrabber`**             | Downloads videos using `yt-dlp` and tags them with GPT-4o metadata. Automatically updates to the latest version.                      |
 | **`fixsteamcompatibility`** | Moves all Proton compatibility prefixes to a native filesystem and replaces them with symlinks — solving Steam/Proton symlink issues. |
 | **`kernelcleaner`**         | Safely removes old Linux kernel versions to free up disk space.                                                                       |
 | **`brightshift`**           | Instantly adjusts monitor brightness using `xrandr`, useful for multi-monitor Linux setups.                                           |
 | **`shrinkaudio`**           | Batch-downsizes MP3 and M4A files by slightly lowering their bitrate using `ffmpeg`. Skips files prefixed with `OLD`.                 |
+| **`wallpapergenerator`**    | Generates AI wallpapers using OpenAI's GPT-image-1 with iterative refinement and generation history tracking.                         |
 
 Each tool is completely self-contained and can be installed or uninstalled independently.
 

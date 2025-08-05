@@ -2,6 +2,13 @@
 
 Tool that removes old Linux kernel versions to help keep your system clean and reclaim disk space.
 
+## Installation
+
+Install via pipx:
+```bash
+pipx install /path/to/kernelcleaner
+```
+
 ## Usage
 
 ```bash

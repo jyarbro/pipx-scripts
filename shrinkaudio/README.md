@@ -2,6 +2,13 @@
 
 CLI tool for batch downsizing `.mp3` and `.m4a` audio files to fit under a target file size using smart bitrate selection.
 
+## Installation
+
+Install via pipx:
+```bash
+pipx install /path/to/shrinkaudio
+```
+
 ## Usage
 
 ```bash

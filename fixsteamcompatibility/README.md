@@ -2,6 +2,13 @@
 
 Utility that moves Steam Proton `compatdata/` prefixes to a native filesystem and replaces them with symlinks.
 
+## Installation
+
+Install via pipx:
+```bash
+pipx install /path/to/fixsteamcompatibility
+```
+
 ## Usage
 
 ```bash

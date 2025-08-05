@@ -2,6 +2,13 @@
 
 Command-line tool to download and tag YouTube audio using `yt-dlp` and OpenAI's GPT-4o.
 
+## Installation
+
+Install via pipx:
+```bash
+pipx install /path/to/ytgrabber
+```
+
 ## Usage
 
 ```bash
