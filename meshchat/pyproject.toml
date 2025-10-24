@@ -1,0 +1,16 @@
+[project]
+name = "meshchat"
+version = "0.1.0"
+description = "Auto-updating launcher for Reticulum MeshChat AppImage"
+authors = [{ name = "nrrdio", email = "nrrdio@outlook.com" }]
+requires-python = ">=3.7"
+dependencies = [
+    "requests"
+]
+
+[project.scripts]
+meshchat = "meshchat.__main__:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
