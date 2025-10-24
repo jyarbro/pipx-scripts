@@ -14,6 +14,7 @@ CONFIG_DIR = os.path.expanduser("~/.config/wallpapergenerator")
 DAILY_PROMPT_FILE = os.path.join(CONFIG_DIR, "daily_prompt.json")
 HISTORY_FILE = os.path.join(CONFIG_DIR, "history.json")
 LOCATION_FILE = os.path.join(CONFIG_DIR, "location.json")
+THEME_HISTORY_FILE = os.path.join(CONFIG_DIR, "theme_history.txt")
 
 
 def get_help():
@@ -84,6 +85,30 @@ def load_location():
     except Exception:
         print("❌ Error reading location config!")
         sys.exit(1)
+
+
+def load_theme_history():
+    """Load past themes from history file (one theme per line)"""
+    ensure_config_dir()
+    if not os.path.exists(THEME_HISTORY_FILE):
+        return []
+    try:
+        with open(THEME_HISTORY_FILE, 'r') as f:
+            themes = [line.strip() for line in f if line.strip()]
+            return themes
+    except Exception as e:
+        print(f"⚠️  Error loading theme history: {e}")
+        return []
+
+
+def save_theme_to_history(theme):
+    """Append a new theme to the history file"""
+    ensure_config_dir()
+    try:
+        with open(THEME_HISTORY_FILE, 'a') as f:
+            f.write(theme + '\n')
+    except Exception as e:
+        print(f"⚠️  Error saving theme to history: {e}")
 
 
 def load_generation_history():
@@ -247,31 +272,67 @@ def get_today_str():
 def load_daily_prompt():
     ensure_config_dir()
     if not os.path.exists(DAILY_PROMPT_FILE):
-        return None
+        return None, None
     try:
         with open(DAILY_PROMPT_FILE, "r") as f:
             data = json.load(f)
             if data.get("date") == get_today_str():
-                return data.get("prompt")
+                return data.get("theme"), data.get("prompt")
     except Exception:
         pass
-    return None
+    return None, None
 
 # Save daily prompt to file
-def save_daily_prompt(prompt):
+def save_daily_prompt(theme, prompt):
     ensure_config_dir()
     with open(DAILY_PROMPT_FILE, "w") as f:
-        json.dump({"date": get_today_str(), "prompt": prompt}, f)
+        json.dump({"date": get_today_str(), "theme": theme, "prompt": prompt}, f)
 
-# Generate a new base prompt for the day using GPT
-def get_new_base_prompt(client):
-    system_prompt = (
-        "Generate a creative, visually interesting wallpaper prompt for an AI image generator. "
-        "Do not include any time, weather, or season information."
+# Generate a new theme (Stage 1 of 3)
+def generate_new_theme(client):
+    """Generate a unique theme that doesn't overlap with past themes"""
+    past_themes = load_theme_history()
+
+    if past_themes:
+        past_themes_text = "\n".join([f"- {theme}" for theme in past_themes[-30:]])  # Last 30 themes for context
+        theme_prompt = (
+            f"Generate a single, concise theme (2-5 words) for a wallpaper image. "
+            f"Be creative and eclectic. Here are recent past themes to AVOID overlapping with:\n\n"
+            f"{past_themes_text}\n\n"
+            f"Generate a NEW theme that is distinctly different from these past themes. "
+            f"Explore different art styles, subjects, moods, and concepts. "
+            f"Respond with ONLY the theme, nothing else."
+        )
+    else:
+        theme_prompt = (
+            "Generate a single, concise theme (2-5 words) for a wallpaper image. "
+            "Be creative and eclectic. Explore different art styles, subjects, moods, and concepts. "
+            "Respond with ONLY the theme, nothing else."
+        )
+
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": theme_prompt}]
+    )
+    theme = response.choices[0].message.content.strip()
+    # Clean up any quotes or extra formatting
+    theme = theme.strip('"\'')
+    return theme
+
+
+# Generate a new base prompt for the day using the theme (Stage 2 of 3)
+def get_new_base_prompt(client, theme):
+    """Generate a detailed wallpaper prompt based on the given theme"""
+    prompt_generation = (
+        f"Generate a creative, visually interesting wallpaper prompt for an AI image generator "
+        f"based on this theme: '{theme}'. "
+        f"Create a detailed description that will result in a stunning wallpaper. "
+        f"Do not include any time, weather, or season information - that will be added later. "
+        f"Respond with ONLY the prompt description, nothing else."
     )
     response = client.chat.completions.create(
         model="gpt-4o",
-        messages=[{"role": "system", "content": system_prompt}]
+        messages=[{"role": "user", "content": prompt_generation}]
     )
     return response.choices[0].message.content.strip()
 
@@ -360,23 +421,44 @@ def main():
         return
     api_key = load_api_key()
     client = OpenAI(api_key=api_key)
+
+    # Three-stage process: Theme -> Prompt -> Image
     if args.reset_base_prompt:
-        print("🔄 Resetting base prompt for today...")
-        base_prompt = get_new_base_prompt(client)
-        save_daily_prompt(base_prompt)
-        print(f"📝 New base prompt: {base_prompt}")
+        print("🔄 Resetting theme and base prompt for today...")
+        # Stage 1: Generate new theme
+        print("🎭 Stage 1/3: Generating new theme...")
+        theme = generate_new_theme(client)
+        print(f"   Theme: {theme}")
+        save_theme_to_history(theme)
+
+        # Stage 2: Generate prompt based on theme
+        print("📝 Stage 2/3: Generating prompt from theme...")
+        base_prompt = get_new_base_prompt(client, theme)
+        save_daily_prompt(theme, base_prompt)
+        print(f"   Prompt: {base_prompt}")
     else:
-        base_prompt = load_daily_prompt()
-        if not base_prompt:
-            print("🌅 Generating new base prompt for today...")
-            base_prompt = get_new_base_prompt(client)
-            save_daily_prompt(base_prompt)
-            print(f"📝 Today's base prompt: {base_prompt}")
+        theme, base_prompt = load_daily_prompt()
+        # If we don't have both theme and prompt (e.g., old format or new day), generate both
+        if not base_prompt or not theme:
+            print("🌅 Generating new theme and base prompt for today...")
+            # Stage 1: Generate new theme
+            print("🎭 Stage 1/3: Generating new theme...")
+            theme = generate_new_theme(client)
+            print(f"   Theme: {theme}")
+            save_theme_to_history(theme)
+
+            # Stage 2: Generate prompt based on theme
+            print("📝 Stage 2/3: Generating prompt from theme...")
+            base_prompt = get_new_base_prompt(client, theme)
+            save_daily_prompt(theme, base_prompt)
+            print(f"   Prompt: {base_prompt}")
         else:
+            print(f"🎭 Using today's theme: {theme}")
             print(f"📝 Using today's base prompt: {base_prompt}")
-    # Build full prompt for this run
+    # Build full prompt for this run (Stage 3 prepares the final image generation prompt)
+    print("🖼️  Stage 3/3: Generating image with location/time context...")
     full_prompt = build_full_prompt(base_prompt, client)
-    print(f"🔗 Full prompt: {full_prompt}")
+    print(f"   Final prompt: {full_prompt}")
     # Find previous image for today (thread)
     iterate_id = get_previous_image_id_today()
     quality = validate_quality(args.quality)

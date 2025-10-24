@@ -1,6 +1,6 @@
 [project]
 name = "wallpapergenerator"
-version = "0.9.1"
+version = "0.10.1"
 description = "Generate AI wallpapers using OpenAI's GPT-image-1 with response models and iterative feedback"
 authors = [{ name = "nrrdio", email = "nrrdio@outlook.com" }]
 requires-python = ">=3.7"
