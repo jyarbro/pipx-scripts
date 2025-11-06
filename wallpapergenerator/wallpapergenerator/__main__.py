@@ -8,6 +8,9 @@ import json
 from datetime import datetime, date
 from openai import OpenAI
 import pytz
+import cv2
+import numpy as np
+from PIL import Image
 
 
 CONFIG_DIR = os.path.expanduser("~/.config/wallpapergenerator")
@@ -21,20 +24,31 @@ def get_help():
     print("""
 WallpaperGenerator - Generate AI wallpapers using OpenAI's GPT-image-1
 
-This tool generates custom wallpapers (always 1920x1080, 16:9) for your Cinnamon desktop.
-The image will be stretched to fit ultrawide monitors (e.g., 2560x1080).
+This tool generates custom wallpapers with AI upscaling to 4K resolution.
+Images are generated at 1792x1024 and automatically upscaled to 3840x2160
+using Real-ESRGAN for maximum quality.
 
 Usage:
   wallpapergenerator "a serene mountain landscape at sunset"
   wallpapergenerator --iterate <image-id> "make it more vibrant with golden colors"
   wallpapergenerator --save-only "cyberpunk city at night"
+  wallpapergenerator --quality high
 
 Options:
-  --iterate     Iterate on a previous image using its ID
-  --save-only   Save image without setting as wallpaper
-  --output-dir  Directory to save images (default: ~/Pictures/Wallpapers)
-  --list-ids    List previous generation IDs
-  --help        Show this help message
+  --iterate        Iterate on a previous image using its ID
+  --save-only      Save image without setting as wallpaper
+  --quality        Image quality: hd (default), high, standard, medium, low
+  --output-dir     Directory to save images (default: ~/Pictures/Wallpapers)
+  --skip-upscale   Skip AI upscaling (save original 1792x1024)
+  --upscale-size   Target resolution (default: 3840x2160)
+  --list-ids       List previous generation IDs
+  --help           Show this help message
+
+Upscaling:
+  By default, images are upscaled to 3840x2160 (4K) using Real-ESRGAN.
+  This process takes 15-30 seconds but produces exceptional quality.
+  Use --skip-upscale to save time during testing.
+  Use --upscale-size to specify custom resolutions (e.g., 5120x2880).
 
 API Key:
   Place your OpenAI API key in ~/.openai_api_key
@@ -134,22 +148,25 @@ def save_generation_history(history):
         print(f"⚠️  Error saving generation history: {e}")
 
 
-def generate_image(client, prompt, quality="standard", iterate_id=None):
+def generate_image(client, prompt, quality="hd", iterate_id=None):
     """Generate image using OpenAI responses API with image_generation tool"""
     try:
+        # Add explicit size and quality instructions to the prompt
+        enhanced_prompt = f"{prompt} [Generate as a high-quality 1792x1024 widescreen image with maximum detail and clarity]"
+
         print(f"🎨 Generating image: '{prompt}'")
-        print(f"📐 Size: 1920x1080 (16:9), Quality: {quality}")
-        
+        print(f"📐 Target: 1792x1024 (widescreen), Quality: {quality}")
+
         history = load_generation_history()
         previous_response_id = None
         if iterate_id and iterate_id in history:
             previous_response_id = history[iterate_id].get("response_id")
             print(f"🔄 Iterating on response ID: {previous_response_id}")
-        
-        # Use gpt-4.1-mini as in your example
+
+        # Use gpt-4.1 (full model, not mini) for better image quality
         response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=prompt,
+            model="gpt-4.1",
+            input=enhanced_prompt,
             tools=[{"type": "image_generation"}],
             previous_response_id=previous_response_id if previous_response_id else None
         )
@@ -168,7 +185,7 @@ def generate_image(client, prompt, quality="standard", iterate_id=None):
             "image_base64": image_base64,
             "response_id": response.id,
             "prompt": prompt,
-            "size": "1920x1080",
+            "size": "1792x1024",
             "quality": quality,
             "timestamp": datetime.now().isoformat(),
             "iterate_from": iterate_id
@@ -188,6 +205,75 @@ def save_image_from_base64(b64_data, output_path):
         return True
     except Exception as e:
         print(f"❌ Error saving image: {e}")
+        return False
+
+
+def upscale_image_realesrgan(input_path, output_path, target_size=(3840, 2160)):
+    """
+    Upscale image using Real-ESRGAN to target resolution
+
+    Args:
+        input_path: Path to input image
+        output_path: Path to save upscaled image
+        target_size: Target resolution tuple (width, height), default 3840x2160
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        print(f"🔍 Upscaling image with Real-ESRGAN...")
+        print(f"   Input: {input_path}")
+        print(f"   Target: {target_size[0]}x{target_size[1]}")
+
+        # Import Real-ESRGAN components
+        from basicsr.archs.rrdbnet_arch import RRDBNet
+        from realesrgan import RealESRGANer
+
+        # Use RealESRGAN_x4plus model (best quality for general images)
+        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
+
+        # Initialize upscaler
+        upsampler = RealESRGANer(
+            scale=4,
+            model_path='https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth',
+            model=model,
+            tile=0,  # No tiling for maximum quality (use GPU memory efficiently)
+            tile_pad=10,
+            pre_pad=0,
+            half=False  # Use full precision for best quality
+        )
+
+        # Read input image
+        img = cv2.imread(input_path, cv2.IMREAD_COLOR)
+        if img is None:
+            print(f"❌ Failed to read image: {input_path}")
+            return False
+
+        # Upscale (this will take 10-15 seconds for quality)
+        print("   Processing... (this may take 15-30 seconds)")
+        output, _ = upsampler.enhance(img, outscale=4)
+
+        # Resize to exact target dimensions if needed
+        current_h, current_w = output.shape[:2]
+        target_w, target_h = target_size
+
+        if (current_w, current_h) != (target_w, target_h):
+            print(f"   Resizing from {current_w}x{current_h} to {target_w}x{target_h}")
+            output = cv2.resize(output, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+
+        # Save upscaled image
+        cv2.imwrite(output_path, output)
+        print(f"✨ Upscaled image saved to: {output_path}")
+
+        return True
+
+    except ImportError as e:
+        print(f"⚠️  Real-ESRGAN not properly installed: {e}")
+        print("   Skipping upscaling. Run: pipx install ./wallpapergenerator --force")
+        return False
+    except Exception as e:
+        print(f"⚠️  Error during upscaling: {e}")
+        print("   Original image saved without upscaling")
         return False
 
 
@@ -215,14 +301,14 @@ def set_wallpaper(image_path):
 
 def validate_quality(quality):
     """Validate image quality parameter"""
-    valid_qualities = ["standard", "hd"]
+    valid_qualities = ["standard", "hd", "high", "medium", "low"]
     if quality not in valid_qualities:
         print(f"❌ Invalid quality '{quality}'. Valid options: {', '.join(valid_qualities)}")
         sys.exit(1)
     return quality
 
 
-def create_filename(prompt, size, quality, generation_id):
+def create_filename(prompt, size, quality, generation_id, upscaled=False):
     """Create a safe filename from prompt and parameters"""
     # Clean prompt for filename
     safe_prompt = "".join(c for c in prompt if c.isalnum() or c in (' ', '-', '_')).rstrip()
@@ -235,7 +321,11 @@ def create_filename(prompt, size, quality, generation_id):
         date_str = dt_fmt.strftime("%Y-%m-%d_%H-%M-%S")
     except Exception:
         date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    return f"{date_str}_wallpaper_{safe_prompt}_1920x1080.png"
+
+    if upscaled:
+        return f"{date_str}_wallpaper_{safe_prompt}_3840x2160.png"
+    else:
+        return f"{date_str}_wallpaper_{safe_prompt}_1792x1024.png"
 
 
 def list_generation_ids():
@@ -400,12 +490,14 @@ def main():
     parser.add_argument("prompt", nargs="?", help="Description of the wallpaper to generate")
     parser.add_argument("--help", action="store_true", help="Show help message")
     parser.add_argument("--iterate", help="Iterate on a previous image using its ID")
-    parser.add_argument("--quality", default="standard", help="Image quality (standard, hd)")
+    parser.add_argument("--quality", default="hd", help="Image quality (standard, hd, high, medium, low)")
     parser.add_argument("--save-only", action="store_true", help="Save image without setting as wallpaper")
     parser.add_argument("--output-dir", default="~/Pictures/Wallpapers", help="Directory to save images")
     parser.add_argument("--list-ids", action="store_true", help="List previous generation IDs")
     parser.add_argument("--test-session", action="store_true", help="Test session lock/idle status and exit")
     parser.add_argument("--reset-base-prompt", action="store_true", help="Reset the base prompt for today and start from scratch")
+    parser.add_argument("--skip-upscale", action="store_true", help="Skip AI upscaling (save original 1792x1024)")
+    parser.add_argument("--upscale-size", default="3840x2160", help="Target upscale resolution (default: 3840x2160)")
     args = parser.parse_args()
 
     if args.test_session:
@@ -466,26 +558,56 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     # Generate image
     result = generate_image(client, full_prompt, quality, iterate_id)
-    filename = create_filename(full_prompt, "1920x1080", quality, result["id"])
+    filename = create_filename(full_prompt, "1792x1024", quality, result["id"], upscaled=False)
     output_path = os.path.join(output_dir, filename)
+
     if save_image_from_base64(result["image_base64"], output_path):
         print(f"✅ Image generated successfully!")
         print(f"🆔 Generation ID: {result['id']}")
+
+        final_path = output_path
+        final_size = "1792x1024"
+
+        # Upscale if not skipped
+        if not args.skip_upscale:
+            # Parse upscale size
+            try:
+                upscale_w, upscale_h = map(int, args.upscale_size.split('x'))
+                upscale_filename = create_filename(full_prompt, "3840x2160", quality, result["id"], upscaled=True)
+                upscale_path = os.path.join(output_dir, upscale_filename)
+
+                if upscale_image_realesrgan(output_path, upscale_path, target_size=(upscale_w, upscale_h)):
+                    final_path = upscale_path
+                    final_size = f"{upscale_w}x{upscale_h}"
+                    print(f"🎯 Final resolution: {final_size}")
+                else:
+                    print(f"⚠️  Using original resolution: {final_size}")
+            except ValueError:
+                print(f"⚠️  Invalid upscale size format: {args.upscale_size}. Use WIDTHxHEIGHT (e.g., 3840x2160)")
+                print(f"   Using original resolution: {final_size}")
+        else:
+            print(f"⏭️  Skipping upscale (original resolution: {final_size})")
+
+        # Save history
         history = load_generation_history()
         history[result["id"]] = {
             "prompt": result["prompt"],
             "response_id": result["response_id"],
-            "size": "1920x1080",
+            "size": final_size,
             "quality": result["quality"],
             "timestamp": result["timestamp"],
             "iterate_from": result["iterate_from"],
-            "file_path": output_path
+            "file_path": final_path,
+            "original_path": output_path if final_path != output_path else None
         }
         save_generation_history(history)
+
+        # Set wallpaper using final (upscaled or original) image
         if not args.save_only:
-            set_wallpaper(output_path)
+            set_wallpaper(final_path)
         else:
-            print(f"📁 Image saved to: {output_path}")
+            print(f"📁 Image saved to: {final_path}")
+
         print(f"💡 Use '--iterate {result['id']}' to refine this image")
     print("🎉 Done!")
 
