@@ -33,10 +33,11 @@ DUMP_TYPE = "pages-articles-multistream"
 class WikiUpdater:
     """Manages Wikipedia dump downloads and imports."""
 
-    def __init__(self, wiki_dir: Path, force_download: bool = False, parallel_jobs: int = 8):
+    def __init__(self, wiki_dir: Path, force_download: bool = False, parallel_jobs: int = 8, rebuild_indexes_only: bool = False):
         self.wiki_dir = wiki_dir
         self.force_download = force_download
         self.parallel_jobs = parallel_jobs
+        self.rebuild_indexes_only = rebuild_indexes_only
         self.dump_base_url = DUMP_BASE_URL
         self.wiki_lang = WIKI_LANG
         self.dump_type = DUMP_TYPE
@@ -269,6 +270,159 @@ class WikiUpdater:
         except subprocess.CalledProcessError:
             return False
 
+    def scale_up_resources(self) -> bool:
+        """Scale up MariaDB resources for import (aggressive tuning)."""
+        console.print("[blue]⚙[/blue]  Scaling up database resources for import...")
+
+        # Backup current config files
+        compose_file = self.wiki_dir / "docker-compose.yml"
+        tuning_file = self.wiki_dir / "mariadb-conf" / "99-tuning.cnf"
+        compose_backup = self.wiki_dir / "docker-compose.yml.backup"
+        tuning_backup = self.wiki_dir / "mariadb-conf" / "99-tuning.cnf.backup"
+
+        try:
+            # Backup files
+            subprocess.run(["cp", str(compose_file), str(compose_backup)], check=True)
+            subprocess.run(["cp", str(tuning_file), str(tuning_backup)], check=True)
+
+            # Update docker-compose.yml with aggressive settings
+            with open(compose_file, 'r') as f:
+                content = f.read()
+
+            # Replace the command line with aggressive import settings
+            content = re.sub(
+                r'command: \["--innodb-buffer-pool-size=[^"]+", "--max-connections=[^"]+", "--innodb-io-capacity=[^"]+", "--innodb-io-capacity-max=[^"]+"\]',
+                'command: ["--innodb-buffer-pool-size=16G", "--max-connections=200", "--innodb-io-capacity=4000", "--innodb-io-capacity-max=8000"]',
+                content
+            )
+
+            with open(compose_file, 'w') as f:
+                f.write(content)
+
+            # Update 99-tuning.cnf with aggressive settings
+            aggressive_config = """[mysqld]
+innodb_log_file_size = 2G
+innodb_flush_log_at_trx_commit = 0
+innodb_thread_concurrency = 0
+innodb_read_io_threads = 16
+innodb_write_io_threads = 16
+innodb_flush_method = O_DIRECT
+innodb_doublewrite = 0
+tmpdir = /dev/shm
+skip_log_bin=1
+max_heap_table_size = 2G
+tmp_table_size = 2G
+"""
+            with open(tuning_file, 'w') as f:
+                f.write(aggressive_config)
+
+            # Restart database with new settings
+            console.print("[blue]⚙[/blue]  Restarting database with aggressive settings...")
+            subprocess.run(
+                ["sudo", "docker", "compose", "restart", "db"],
+                cwd=self.wiki_dir,
+                check=True,
+                capture_output=True
+            )
+
+            # Wait for database to be ready
+            import time
+            time.sleep(10)
+
+            console.print("[green]✓[/green] Resources scaled up for import")
+            console.print("[yellow]  - Buffer pool: 16G[/yellow]")
+            console.print("[yellow]  - Max connections: 200[/yellow]")
+            console.print("[yellow]  - IO capacity: 4000/8000[/yellow]")
+            console.print("[yellow]  - Log file: 2G[/yellow]")
+            console.print("[yellow]  - Flush at commit: 0 (unsafe but fast)[/yellow]")
+            return True
+
+        except Exception as e:
+            console.print(f"[red]✗ Failed to scale up resources: {e}[/red]")
+            # Attempt to restore backups
+            try:
+                subprocess.run(["cp", str(compose_backup), str(compose_file)], check=True)
+                subprocess.run(["cp", str(tuning_backup), str(tuning_file)], check=True)
+            except Exception:
+                pass
+            return False
+
+    def scale_down_resources(self) -> bool:
+        """Restore normal MariaDB resources after import."""
+        console.print("\n[blue]⚙[/blue]  Restoring normal database resources...")
+
+        compose_backup = self.wiki_dir / "docker-compose.yml.backup"
+        tuning_backup = self.wiki_dir / "mariadb-conf" / "99-tuning.cnf.backup"
+
+        try:
+            # Check if backups exist
+            if not compose_backup.exists() or not tuning_backup.exists():
+                console.print("[yellow]⚠ No backup files found, using safe defaults[/yellow]")
+
+                # Write safe default configs
+                compose_file = self.wiki_dir / "docker-compose.yml"
+                tuning_file = self.wiki_dir / "mariadb-conf" / "99-tuning.cnf"
+
+                # Update compose file with normal settings
+                with open(compose_file, 'r') as f:
+                    content = f.read()
+
+                content = re.sub(
+                    r'command: \["--innodb-buffer-pool-size=[^"]+", "--max-connections=[^"]+", "--innodb-io-capacity=[^"]+", "--innodb-io-capacity-max=[^"]+"\]',
+                    'command: ["--innodb-buffer-pool-size=2G", "--max-connections=50", "--innodb-io-capacity=1000", "--innodb-io-capacity-max=2000"]',
+                    content
+                )
+
+                with open(compose_file, 'w') as f:
+                    f.write(content)
+
+                # Write normal tuning config
+                normal_config = """[mysqld]
+innodb_log_file_size = 512M
+innodb_flush_log_at_trx_commit = 1
+innodb_thread_concurrency = 0
+innodb_read_io_threads = 4
+innodb_write_io_threads = 4
+innodb_flush_method = O_DIRECT
+innodb_doublewrite = 1
+skip_log_bin=1
+max_heap_table_size = 512M
+tmp_table_size = 512M
+"""
+                with open(tuning_file, 'w') as f:
+                    f.write(normal_config)
+            else:
+                # Restore from backups
+                compose_file = self.wiki_dir / "docker-compose.yml"
+                tuning_file = self.wiki_dir / "mariadb-conf" / "99-tuning.cnf"
+
+                subprocess.run(["cp", str(compose_backup), str(compose_file)], check=True)
+                subprocess.run(["cp", str(tuning_backup), str(tuning_file)], check=True)
+
+                # Remove backup files
+                compose_backup.unlink()
+                tuning_backup.unlink()
+
+            # Restart database with normal settings
+            console.print("[blue]⚙[/blue]  Restarting database with normal settings...")
+            subprocess.run(
+                ["sudo", "docker", "compose", "restart", "db"],
+                cwd=self.wiki_dir,
+                check=True,
+                capture_output=True
+            )
+
+            console.print("[green]✓[/green] Resources restored to normal operation")
+            console.print("[green]  - Buffer pool: 2G[/green]")
+            console.print("[green]  - Max connections: 50[/green]")
+            console.print("[green]  - IO capacity: 1000/2000[/green]")
+            console.print("[green]  - ACID-compliant settings enabled[/green]")
+            return True
+
+        except Exception as e:
+            console.print(f"[red]✗ Failed to restore resources: {e}[/red]")
+            return False
+
     def get_estimated_total_pages(self, dump_date: str) -> int:
         """Estimate total pages from dump metadata or index file."""
         # BEST METHOD: count lines in index file (most accurate)
@@ -326,6 +480,10 @@ class WikiUpdater:
             console.print("[red]✗ MediaWiki container is not running![/red]")
             console.print(f"Start it with: cd {self.wiki_dir} && sudo docker compose up -d")
             return False
+
+        # Scale up resources for import
+        if not self.scale_up_resources():
+            console.print("[yellow]⚠ Warning: Could not scale up resources, continuing anyway...[/yellow]")
 
         base_filename = f"{self.wiki_lang}-{dump_date}-{self.dump_type}"
         xml_bz2 = self.wiki_dir / f"{base_filename}.xml.bz2"
@@ -480,6 +638,9 @@ class WikiUpdater:
                     console.print(f"[green]  Pages imported:[/green] {pages_count:,}")
                     console.print(f"[green]  Time elapsed:[/green] {elapsed/3600:.1f} hours")
                     console.print(f"[green]  Average rate:[/green] {avg_rate:.0f} pages/sec")
+
+                    # Scale down resources after successful import
+                    self.scale_down_resources()
                     return True
                 else:
                     self.save_progress({
@@ -495,6 +656,9 @@ class WikiUpdater:
                     })
                     console.print(f"\n[red]✗ Import failed with exit code {import_returncode}[/red]")
                     console.print(f"[red]Check {log_file} for details[/red]")
+
+                    # Scale down resources after failed import
+                    self.scale_down_resources()
                     return False
 
         except Exception as e:
@@ -508,6 +672,9 @@ class WikiUpdater:
                 "log_file": str(log_file)
             })
             console.print(f"[red]✗ Import error: {e}[/red]")
+
+            # Scale down resources after error
+            self.scale_down_resources()
             return False
 
     def rebuild_indexes(self) -> bool:
@@ -515,26 +682,39 @@ class WikiUpdater:
         console.print("\n[bold blue]Rebuilding indexes and caches...[/bold blue]")
 
         steps = [
-            ("Rebuilding recent changes", ["php", "maintenance/rebuildrecentchanges.php"]),
-            ("Rebuilding all indexes", ["php", "maintenance/rebuildall.php", "--quick"]),
-            ("Running maintenance jobs", ["php", "maintenance/runJobs.php"]),
+            ("Rebuilding recent changes", ["php", "maintenance/rebuildrecentchanges.php"], False),  # Optional - can fail
+            ("Rebuilding all indexes", ["php", "maintenance/rebuildall.php"], True),  # Required
+            ("Running maintenance jobs", ["php", "maintenance/runJobs.php"], True),  # Required
         ]
 
-        for description, cmd in steps:
+        failed_steps = []
+        for description, cmd, required in steps:
             console.print(f"[blue]⚙[/blue]  {description}...")
             try:
-                subprocess.run(
-                    ["sudo", "docker", "compose", "exec", "mediawiki"] + cmd,
+                result = subprocess.run(
+                    ["sudo", "docker", "compose", "exec", "-T", "mediawiki"] + cmd,
                     cwd=self.wiki_dir,
                     check=True,
-                    capture_output=True
+                    capture_output=True,
+                    text=True
                 )
                 console.print(f"[green]✓[/green] {description} complete")
             except subprocess.CalledProcessError as e:
                 console.print(f"[red]✗ {description} failed: {e}[/red]")
-                return False
+                if e.stderr:
+                    console.print(f"[red]Error output:[/red]\n{e.stderr}")
+                if e.stdout:
+                    console.print(f"[yellow]Command output:[/yellow]\n{e.stdout}")
 
-        console.print("[green]✓ All indexes rebuilt successfully![/green]")
+                if required:
+                    return False
+                else:
+                    console.print(f"[yellow]⚠[/yellow]  {description} is optional, continuing...")
+                    failed_steps.append(description)
+
+        if failed_steps:
+            console.print(f"[yellow]⚠ Some optional steps failed: {', '.join(failed_steps)}[/yellow]")
+        console.print("[green]✓ Index rebuild complete![/green]")
         return True
 
     def cleanup_old_dumps(self, keep_date: str):
@@ -595,6 +775,21 @@ class WikiUpdater:
         console.print("\n[bold cyan]═══════════════════════════════════════════════════════════[/bold cyan]")
         console.print("[bold cyan]           Wikipedia Dump Update Tool                  [/bold cyan]")
         console.print("[bold cyan]═══════════════════════════════════════════════════════════[/bold cyan]\n")
+
+        # Handle rebuild-indexes-only mode
+        if self.rebuild_indexes_only:
+            console.print("[bold blue]Running index rebuild only...[/bold blue]\n")
+            if not self.check_docker_running():
+                console.print("[red]✗ MediaWiki container is not running![/red]")
+                console.print(f"Start it with: cd {self.wiki_dir} && sudo docker compose up -d")
+                return 1
+
+            if self.rebuild_indexes():
+                console.print("\n[bold green]✓ Index rebuild complete![/bold green]\n")
+                return 0
+            else:
+                console.print("\n[bold red]✗ Index rebuild failed[/bold red]\n")
+                return 1
 
         progress = self.load_progress()
         skip_download = False
@@ -737,9 +932,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  wikiupdate                    # Check for and install updates
-  wikiupdate --force-download   # Re-download even if files exist
-  wikiupdate --parallel-jobs 12 # Use 12 parallel jobs (not yet implemented)
+  wikiupdate                      # Check for and install updates
+  wikiupdate --force-download     # Re-download even if files exist
+  wikiupdate --parallel-jobs 12   # Use 12 parallel jobs (not yet implemented)
+  wikiupdate --rebuild-indexes-only # Only rebuild indexes (after import)
 
 Notes:
   - This tool preserves revision history - old versions are kept
@@ -761,6 +957,12 @@ Notes:
         help="Number of parallel import jobs (default: 8, not yet implemented)"
     )
 
+    parser.add_argument(
+        "--rebuild-indexes-only",
+        action="store_true",
+        help="Only rebuild MediaWiki indexes and caches (skip download/import)"
+    )
+
     args = parser.parse_args()
 
     # Check if running as root or with sudo access
@@ -775,7 +977,8 @@ Notes:
     updater = WikiUpdater(
         wiki_dir=WIKI_DIR,
         force_download=args.force_download,
-        parallel_jobs=args.parallel_jobs
+        parallel_jobs=args.parallel_jobs,
+        rebuild_indexes_only=args.rebuild_indexes_only
     )
 
     try:
