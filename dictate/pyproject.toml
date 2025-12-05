@@ -1,0 +1,13 @@
+[project]
+name = "dictate"
+version = "0.1.0"
+description = "Voice dictation using OpenAI Whisper"
+authors = [{ name = "nrrdio", email = "nrrdio@outlook.com" }]
+dependencies = []
+
+[project.scripts]
+dictate = "dictate.__main__:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
