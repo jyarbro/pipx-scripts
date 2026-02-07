@@ -79,7 +79,7 @@ You are a research assistant. Based on the YouTube video title and the known upl
 Title: \"{title}\"
 Uploaded to YouTube on: {upload_date}
 
-Return ONLY the following data in this exact structured format:
+Return the following structured data:
 - Date: When the event occurred (YYYY-MM-DD)
 - Event: The name of the event or show (if known)
 - Location: The venue and city
@@ -89,9 +89,10 @@ If you can't find reliable info, respond with \"Unknown\" for the field.
 """
 
         response = client.chat.completions.create(
-            model="gpt-4o-search-preview",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=300
+            max_tokens=300,
+            temperature=0.4
         )
         content = response.choices[0].message.content
         return content.strip() if content else None
