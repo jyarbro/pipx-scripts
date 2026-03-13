@@ -1,6 +1,6 @@
 [project]
 name = "ytgrabber"
-version = "0.2.1"
+version = "0.2.6"
 description = "Download and tag YouTube audio using yt-dlp and Claude"
 authors = [{name = "nrrdio", email = "nrrdio@outlook.com"}]
 requires-python = ">=3.7"
