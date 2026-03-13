@@ -7,14 +7,14 @@ import subprocess
 import requests
 from datetime import datetime
 from mutagen.mp4 import MP4
-from openai import OpenAI
+import anthropic
 
 def get_help():
     print("""
 Downloads YouTube content using yt-dlp with configurable settings.
 
-Defaults to highest-quality audio in M4A format, and uses ChatGPT to extract metadata from the title.
-If the GPT call fails, it will prompt you for metadata manually.
+Defaults to highest-quality audio in M4A format, and uses Claude to extract metadata from the title.
+If the Claude call fails, it will prompt you for metadata manually.
 """)
     sys.exit(0)
 
@@ -67,11 +67,11 @@ def get_video_title(binary, url):
         print(f"Error retrieving video title or upload date: {e}")
         return None, None
 
-def extract_metadata_from_gpt(title, upload_date):
+def extract_metadata_from_claude(title, upload_date):
     try:
-        with open(os.path.expanduser("~/.openai_api_key")) as f:
+        with open(os.path.expanduser("~/.anthropic_api_key")) as f:
             api_key = f.read().strip()
-        client = OpenAI(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key)
 
         prompt = f"""
 You are a research assistant. Based on the YouTube video title and the known upload date below, perform a web search to determine the most likely real-world event (concert, performance, or show) the video is from.
@@ -79,25 +79,26 @@ You are a research assistant. Based on the YouTube video title and the known upl
 Title: \"{title}\"
 Uploaded to YouTube on: {upload_date}
 
-Return the following structured data:
+Return ONLY the following structured data, one per line, with no extra commentary:
 - Date: When the event occurred (YYYY-MM-DD)
 - Event: The name of the event or show (if known)
 - Location: The venue and city
 - Artist: Who performed
 
-If you can't find reliable info, respond with \"Unknown\" for the field.
+If you can't find reliable info, respond with "Unknown" for that field.
 """
 
-        response = client.chat.completions.create(
-            model="gpt-4o",
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=512,
+            tools=[{"type": "web_search_20250305", "name": "web_search"}],
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=300,
-            temperature=0.4
         )
-        content = response.choices[0].message.content
-        return content.strip() if content else None
+        text_parts = [block.text for block in response.content if block.type == "text"]
+        content = "\n".join(text_parts).strip()
+        return content if content else None
     except Exception as e:
-        print(f"GPT metadata fetch failed: {e}")
+        print(f"Claude metadata fetch failed: {e}")
         return None
 
 def tag_file(path, artist, title, year):
@@ -138,7 +139,7 @@ def main():
     if not title or not upload_date:
         sys.exit(1)
 
-    metadata = extract_metadata_from_gpt(title, upload_date)
+    metadata = extract_metadata_from_claude(title, upload_date)
 
     # Initialize variables
     event_date = ""
@@ -147,7 +148,7 @@ def main():
     artist_name = ""
 
     if metadata:
-        print("\nGPT Metadata Response:\n" + metadata)
+        print("\nClaude Metadata Response:\n" + metadata)
         try:
             lines = metadata.splitlines()
             event_date = lines[0].split(":", 1)[1].strip()

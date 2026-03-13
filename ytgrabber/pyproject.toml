@@ -1,10 +1,10 @@
 [project]
 name = "ytgrabber"
-version = "0.1.0"
-description = "Download and tag YouTube audio using yt-dlp and GPT"
+version = "0.2.1"
+description = "Download and tag YouTube audio using yt-dlp and Claude"
 authors = [{name = "nrrdio", email = "nrrdio@outlook.com"}]
 requires-python = ">=3.7"
-dependencies = ["requests","mutagen","openai"]
+dependencies = ["requests","mutagen","anthropic"]
 
 [project.scripts]
 ytgrabber = "ytgrabber.__main__:main"
