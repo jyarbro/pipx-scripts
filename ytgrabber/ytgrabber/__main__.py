@@ -32,7 +32,7 @@ Options:
 Examples:
   ytgrabber URL                                    # DJ set / concert mode
   ytgrabber URL --simple                           # Generic video, artist from channel
-  ytgrabber URL --simple --artist "Mady Morrison"  # Override artist name
+  ytgrabber URL --simple --artist "John Doe"       # Override artist name
 """)
     sys.exit(0)
 
